@@ -84,6 +84,18 @@ class WebGeocoder(Geocoder):
                     return child and child.nodeValue.strip(strip)
 
     @classmethod
+    def _get_first_attribute(cls, node, tag_names, attribute, strip=None):
+        if isinstance(tag_names, basestring):
+            tag_names = [tag_names]
+        if node:
+            while tag_names:
+                node = xml.dom.minidom.parseString(node.toxml())
+                nodes = node.getElementsByTagName(tag_names.pop(0))
+                if nodes:
+                    nodes = nodes[0]
+                    return nodes.getAttribute(attribute)
+
+    @classmethod
     def _join_filter(cls, sep, seq, pred=bool):
         """Join items in ``seq`` with string ``sep`` if pred(item) is True.
         Sequence items are passed to unicode() before joining."""
@@ -473,22 +485,22 @@ class Yahoo(WebGeocoder):
         self.output_format = output_format.lower()
         self.url = "http://api.local.yahoo.com/MapsService/V1/geocode?%s"
 
-    def geocode(self, string, exactly_one=True):
+    def geocode(self, string, exactly_one=True, return_accuracy=False):
         params = {'location': self.format_string % string,
                   'output': self.output_format,
                   'appid': self.app_id
                   }
         url = self.url % urlencode(params)
-        return self.geocode_url(url, exactly_one)
+        return self.geocode_url(url, exactly_one, return_accuracy)
     
-    def geocode_url(self, url, exactly_one=True):
+    def geocode_url(self, url, exactly_one=True, return_accuracy=False):
         print "Fetching %s..." % url
         page = urlopen(url)
         
         parse = getattr(self, 'parse_' + self.output_format)
-        return parse(page, exactly_one)
+        return parse(page, exactly_one, return_accuracy)
 
-    def parse_xml(self, page, exactly_one=True):
+    def parse_xml(self, page, exactly_one=True, return_accuracy=False):
         """Parse a location name, latitude, and longitude from an XML response.
         """
         if not isinstance(page, basestring):
@@ -514,12 +526,41 @@ class Yahoo(WebGeocoder):
             latitude = latitude and float(latitude)
             longitude = self._get_first_text(result, 'Longitude') or None
             longitude = longitude and float(longitude)
-            return (location, (latitude, longitude))
+
+            if return_accuracy:
+                accuracy = self._get_first_attribute(result, 'Result', 'precision') or None
+
+                if accuracy:
+                    accuracy = self._code_accuracy(accuracy)
+
+                return (location, (latitude, longitude), accuracy)
+            else:
+                return (location, (latitude, longitude))
     
         if exactly_one:
             return parse_result(results[0])
         else:
             return (parse_result(result) for result in results)
+
+    def _code_accuracy(self, accuracy):
+        if accuracy == "address":
+            return 9
+        elif accuracy == "street":
+            return 7
+        elif accuracy == "zip+4":
+            return 6
+        elif accuracy == "zip+2":
+            return 5
+        elif accuracy == "zip":
+            return 4
+        elif accuracy == "city":
+            return 3
+        elif accuracy == "state":
+            return 2
+        elif accuracy == "country":
+            return 1
+        else:
+            return 0
 
 
 class GeocoderDotUS(WebGeocoder):
